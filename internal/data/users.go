@@ -13,6 +13,8 @@ import (
 
 var ErrDuplicateEmail = errors.New("duplicate email")
 
+var AnonymousUser = &User{}
+
 type User struct {
 	ID        int64     `json:"id"`
 	CreatedAt time.Time `json:"created_at"`
@@ -21,6 +23,10 @@ type User struct {
 	Password  password  `json:"-"`
 	Activated bool      `json:"activated"`
 	Version   string    `json:"-"`
+}
+
+func (u *User) IsAnonymous() bool {
+	return u == AnonymousUser
 }
 
 type password struct {
@@ -128,7 +134,6 @@ func (m UserModel) GetByEmail(email string) (*User, error) {
 		&user.Activated,
 		&user.Version,
 	)
-
 	if err != nil {
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
@@ -179,7 +184,7 @@ func (m UserModel) GetForToken(tokenScope, tokenPlaintext string) (*User, error)
 	tokenHash := sha256.Sum256([]byte(tokenPlaintext))
 
 	query := `
-	SELECT users.id, user.created_at, user.name, user.email, users.password_hash, users.activated, users.version
+	SELECT users.id, users.created_at, users.name, users.email, users.password_hash, users.activated, users.version
 	FROM users
 	INNER JOIN tokens
 	ON users.id = tokens.user_id
