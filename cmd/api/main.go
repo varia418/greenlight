@@ -3,10 +3,14 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
+	"sync"
+	"syscall"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -40,6 +44,7 @@ type application struct {
 	logger *jsonlog.Logger
 	models data.Models
 	mailer mailer.Mailer
+	wg     sync.WaitGroup
 }
 
 func main() {
@@ -87,12 +92,54 @@ func main() {
 		WriteTimeout: 30 * time.Second,
 	}
 
+	shutdownError := make(chan error)
+
+	go func() {
+		quit := make(chan os.Signal, 1)
+		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+		s := <-quit
+
+		app.logger.PrintInfo("caught signal", map[string]string{
+			"signal": s.String(),
+		})
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		err := srv.Shutdown(ctx)
+		if err != nil {
+			shutdownError <- err
+		}
+
+		app.logger.PrintInfo("completing background tasks", map[string]string{
+			"addr": srv.Addr,
+		})
+
+		app.wg.Wait()
+		shutdownError <- nil
+	}()
+
 	logger.PrintInfo("starting server", map[string]string{
 		"addr": srv.Addr,
 		"env":  cfg.env,
 	})
 	err = srv.ListenAndServe()
-	logger.PrintFatal(err, nil)
+	if !errors.Is(err, http.ErrServerClosed) {
+		// return err
+		return
+	}
+
+	err = <-shutdownError
+	if err != nil {
+		// return err
+		return
+	}
+
+	app.logger.PrintInfo("stopped server", map[string]string{
+		"addr": srv.Addr,
+	})
+
+	// return nil
 }
 
 func openDB(cfg config) (*sql.DB, error) {
