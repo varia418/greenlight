@@ -3,14 +3,9 @@ package main
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"flag"
-	"fmt"
-	"net/http"
 	"os"
-	"os/signal"
 	"sync"
-	"syscall"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -93,62 +88,9 @@ func main() {
 		mailer: mailer.New(cfg.smtp.host, cfg.smtp.port, cfg.smtp.username, cfg.smtp.password, cfg.smtp.sender),
 	}
 
-	srv := &http.Server{
-		Addr:         fmt.Sprintf("127.0.0.1:%d", cfg.port),
-		Handler:      app.routes(),
-		IdleTimeout:  time.Minute,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second,
+	if err := app.serve(); err != nil {
+		logger.PrintFatal(err, nil)
 	}
-
-	shutdownError := make(chan error)
-
-	go func() {
-		quit := make(chan os.Signal, 1)
-		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-		s := <-quit
-
-		app.logger.PrintInfo("caught signal", map[string]string{
-			"signal": s.String(),
-		})
-
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		err := srv.Shutdown(ctx)
-		if err != nil {
-			shutdownError <- err
-		}
-
-		app.logger.PrintInfo("completing background tasks", map[string]string{
-			"addr": srv.Addr,
-		})
-
-		app.wg.Wait()
-		shutdownError <- nil
-	}()
-
-	logger.PrintInfo("starting server", map[string]string{
-		"addr": srv.Addr,
-		"env":  cfg.env,
-	})
-	err = srv.ListenAndServe()
-	if !errors.Is(err, http.ErrServerClosed) {
-		// return err
-		return
-	}
-
-	err = <-shutdownError
-	if err != nil {
-		// return err
-		return
-	}
-
-	app.logger.PrintInfo("stopped server", map[string]string{
-		"addr": srv.Addr,
-	})
-
-	// return nil
 }
 
 func openDB(cfg config) (*sql.DB, error) {
