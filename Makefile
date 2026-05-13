@@ -1,3 +1,5 @@
+include .envrc
+
 ## help: print this help message
 .PHONY: help
 help:
@@ -22,5 +24,4 @@ db/migrations/new:
 ## db/migrations/up: apply all up database migrations
 .PHONY: db/migrations/up
 db/migrations/up: confirm
-	migrate -path=./migrations -database="postgres://greenlight:pa55word@localhost/greenlight?sslmode=disable" up
-
+	migrate -path=./migrations -database=${GREENLIGHT_DB_DSN} up
